@@ -50,8 +50,7 @@ scannerRouter.post('/start', async (req, res) => {
 
     // Create scan record in database
     const result = await dbRun(
-      `INSERT INTO scans (url, status, violations_found, pages_scanned, scan_results, content_extracted) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO scans (url, status, violations_found, pages_scanned, scan_results, content_extracted) VALUES ($1, $2, $3, $4, $5, $6)`,
       [url, 'pending', 0, 0, '[]', '[]']
     );
 
@@ -252,12 +251,12 @@ async function processScan(scanId: number, url: string, config: any) {
     // Update database with results
     await dbRun(
       `UPDATE scans SET
-        status = ?,
-        violations_found = ?,
-        pages_scanned = ?,
-        scan_results = ?,
-        content_extracted = ?
-       WHERE id = ?`,
+        status = $1,
+        violations_found = $2,
+        pages_scanned = $3,
+        scan_results = $4,
+        content_extracted = $5
+       WHERE id = $6`,
       [
         'completed',
         violations.length,

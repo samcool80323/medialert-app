@@ -36,8 +36,7 @@ adCreatorRouter.post('/check', async (req, res) => {
 
     // Save draft to database
     const result = await dbRun(
-      `INSERT INTO ad_drafts (session_id, original_content, compliant_content, violations_detected, status) 
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO ad_drafts (session_id, original_content, compliant_content, violations_detected, status) VALUES ($1, $2, $3, $4, $5)`,
       [sessionId, content, compliantContent, JSON.stringify(violations), 'checked']
     );
 
