@@ -337,156 +337,188 @@ export class WebScraper {
 
   // Fallback HTTP scraping method when Puppeteer fails
   private async fallbackHttpScraping(url: string, onProgress?: (progress: { currentPage: string; completed: number; total: number }) => void): Promise<WebsiteContent[]> {
-    console.log('🔄 Using fallback HTTP scraping method...');
+    console.log('🔄 Using fallback HTTP scraping method with multi-page support...');
+    
+    const results: WebsiteContent[] = [];
+    const visitedUrls = new Set<string>();
+    const urlsToVisit: { url: string; depth: number }[] = [{ url, depth: 0 }];
     
     try {
+      while (urlsToVisit.length > 0 && results.length < this.config.maxPages) {
+        const { url: currentUrl, depth } = urlsToVisit.shift()!;
+        
+        if (visitedUrls.has(currentUrl) || depth > this.config.maxDepth) {
+          continue;
+        }
+
+        if (this.shouldExcludeUrl(currentUrl)) {
+          continue;
+        }
+
+        visitedUrls.add(currentUrl);
+
+        if (onProgress) {
+          onProgress({
+            currentPage: currentUrl,
+            completed: results.length,
+            total: Math.min(this.config.maxPages, results.length + urlsToVisit.length + 1),
+          });
+        }
+
+        try {
+          const response = await fetch(currentUrl, {
+            headers: {
+              'User-Agent': 'MediGuard-AI-Scanner/1.0 (Compliance Scanner)',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+              'Accept-Encoding': 'gzip, deflate',
+              'Connection': 'keep-alive',
+            },
+          });
+
+          if (!response.ok) {
+            console.log(`⚠️ Failed to fetch ${currentUrl}: ${response.status}`);
+            continue;
+          }
+
+          const html = await response.text();
+          const $ = cheerio.load(html);
+
+          // Extract basic content using Cheerio
+          const content: WebsiteContent = {
+            url: currentUrl,
+            title: $('title').text().trim() || 'Untitled Page',
+            metaDescription: $('meta[name="description"]').attr('content') || '',
+            headings: {
+              h1: [],
+              h2: [],
+              h3: [],
+            },
+            paragraphs: [],
+            links: [],
+            images: [],
+            forms: [],
+            scripts: [],
+          };
+
+          // Extract headings
+          $('h1').each((_, element) => {
+            const text = $(element).text().trim();
+            if (text) content.headings.h1.push(text);
+          });
+          
+          $('h2').each((_, element) => {
+            const text = $(element).text().trim();
+            if (text) content.headings.h2.push(text);
+          });
+          
+          $('h3').each((_, element) => {
+            const text = $(element).text().trim();
+            if (text) content.headings.h3.push(text);
+          });
+
+          // Extract paragraphs
+          $('p').each((_, element) => {
+            const text = $(element).text().trim();
+            if (text && text.length > 10) {
+              content.paragraphs.push(text);
+            }
+          });
+
+          // Extract links for next pages
+          $('a[href]').each((_, element) => {
+            const href = $(element).attr('href');
+            const text = $(element).text().trim();
+            if (href && text) {
+              try {
+                const absoluteUrl = new URL(href, currentUrl).href;
+                const isInternal = new URL(absoluteUrl).hostname === new URL(currentUrl).hostname;
+                content.links.push({
+                  text,
+                  href: absoluteUrl,
+                  isInternal,
+                });
+
+                // Add internal links for next depth level
+                if (isInternal && depth < this.config.maxDepth && !visitedUrls.has(absoluteUrl) && !urlsToVisit.some(item => item.url === absoluteUrl)) {
+                  urlsToVisit.push({ url: absoluteUrl, depth: depth + 1 });
+                }
+              } catch {
+                // Skip invalid URLs
+              }
+            }
+          });
+
+          // Extract images
+          $('img[src]').each((_, element) => {
+            const src = $(element).attr('src');
+            const alt = $(element).attr('alt') || '';
+            const title = $(element).attr('title');
+            if (src) {
+              try {
+                const absoluteUrl = new URL(src, currentUrl).href;
+                content.images.push({
+                  src: absoluteUrl,
+                  alt,
+                  title,
+                });
+              } catch {
+                // Skip invalid URLs
+              }
+            }
+          });
+
+          // Extract forms
+          $('form').each((_, element) => {
+            const action = $(element).attr('action') || '';
+            const method = $(element).attr('method') || 'GET';
+            const inputs: string[] = [];
+            
+            $(element).find('input, textarea, select').each((_, input) => {
+              const type = $(input).attr('type') || $(input).prop('tagName')?.toLowerCase() || 'input';
+              const name = $(input).attr('name') || '';
+              inputs.push(`${type}${name ? `:${name}` : ''}`);
+            });
+            
+            content.forms.push({
+              action,
+              method: method.toUpperCase(),
+              inputs,
+            });
+          });
+
+          // Extract scripts
+          $('script[src]').each((_, element) => {
+            const src = $(element).attr('src');
+            if (src) {
+              try {
+                const absoluteUrl = new URL(src, currentUrl).href;
+                content.scripts.push(absoluteUrl);
+              } catch {
+                // Skip invalid URLs
+              }
+            }
+          });
+
+          results.push(content);
+          console.log(`✅ Scraped page ${results.length}: ${currentUrl}`);
+
+        } catch (pageError) {
+          console.error(`❌ Failed to scrape ${currentUrl}:`, pageError);
+          continue;
+        }
+      }
+
       if (onProgress) {
         onProgress({
-          currentPage: url,
-          completed: 0,
-          total: 1,
+          currentPage: 'Completed',
+          completed: results.length,
+          total: results.length,
         });
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'MediGuard-AI-Scanner/1.0 (Compliance Scanner)',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive',
-        },
-        // Remove timeout as it's not supported in standard fetch
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const html = await response.text();
-      const $ = cheerio.load(html);
-
-      // Extract basic content using Cheerio
-      const content: WebsiteContent = {
-        url,
-        title: $('title').text().trim() || 'Untitled Page',
-        metaDescription: $('meta[name="description"]').attr('content') || '',
-        headings: {
-          h1: [],
-          h2: [],
-          h3: [],
-        },
-        paragraphs: [],
-        links: [],
-        images: [],
-        forms: [],
-        scripts: [],
-      };
-
-      // Extract headings
-      $('h1').each((_, element) => {
-        const text = $(element).text().trim();
-        if (text) content.headings.h1.push(text);
-      });
-      
-      $('h2').each((_, element) => {
-        const text = $(element).text().trim();
-        if (text) content.headings.h2.push(text);
-      });
-      
-      $('h3').each((_, element) => {
-        const text = $(element).text().trim();
-        if (text) content.headings.h3.push(text);
-      });
-
-      // Extract paragraphs
-      $('p').each((_, element) => {
-        const text = $(element).text().trim();
-        if (text && text.length > 10) { // Filter out very short paragraphs
-          content.paragraphs.push(text);
-        }
-      });
-
-      // Extract links
-      $('a[href]').each((_, element) => {
-        const href = $(element).attr('href');
-        const text = $(element).text().trim();
-        if (href && text) {
-          try {
-            const absoluteUrl = new URL(href, url).href;
-            const isInternal = new URL(absoluteUrl).hostname === new URL(url).hostname;
-            content.links.push({
-              text,
-              href: absoluteUrl,
-              isInternal,
-            });
-          } catch {
-            // Skip invalid URLs
-          }
-        }
-      });
-
-      // Extract images
-      $('img[src]').each((_, element) => {
-        const src = $(element).attr('src');
-        const alt = $(element).attr('alt') || '';
-        const title = $(element).attr('title');
-        if (src) {
-          try {
-            const absoluteUrl = new URL(src, url).href;
-            content.images.push({
-              src: absoluteUrl,
-              alt,
-              title,
-            });
-          } catch {
-            // Skip invalid URLs
-          }
-        }
-      });
-
-      // Extract forms (basic detection)
-      $('form').each((_, element) => {
-        const action = $(element).attr('action') || '';
-        const method = $(element).attr('method') || 'GET';
-        const inputs: string[] = [];
-        
-        $(element).find('input, textarea, select').each((_, input) => {
-          const type = $(input).attr('type') || $(input).prop('tagName')?.toLowerCase() || 'input';
-          const name = $(input).attr('name') || '';
-          inputs.push(`${type}${name ? `:${name}` : ''}`);
-        });
-        
-        content.forms.push({
-          action,
-          method: method.toUpperCase(),
-          inputs,
-        });
-      });
-
-      // Extract scripts
-      $('script[src]').each((_, element) => {
-        const src = $(element).attr('src');
-        if (src) {
-          try {
-            const absoluteUrl = new URL(src, url).href;
-            content.scripts.push(absoluteUrl);
-          } catch {
-            // Skip invalid URLs
-          }
-        }
-      });
-
-      if (onProgress) {
-        onProgress({
-          currentPage: url,
-          completed: 1,
-          total: 1,
-        });
-      }
-
-      console.log('✅ Fallback HTTP scraping completed successfully');
-      return [content];
+      console.log(`✅ Fallback HTTP scraping completed: ${results.length} pages`);
+      return results;
 
     } catch (error) {
       console.error('❌ Fallback HTTP scraping failed:', error);
