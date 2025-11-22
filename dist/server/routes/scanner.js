@@ -9,6 +9,7 @@ const zod_1 = require("zod");
 const init_1 = require("../database/init");
 const webScraper_1 = require("../services/webScraper");
 const complianceAnalyzer_1 = require("../services/complianceAnalyzer");
+const pdfGenerator_1 = require("../services/pdfGenerator");
 exports.scannerRouter = express_1.default.Router();
 // Validation schemas
 const startScanSchema = zod_1.z.object({
@@ -46,8 +47,7 @@ exports.scannerRouter.post('/start', async (req, res) => {
             });
         }
         // Create scan record in database
-        const result = await (0, init_1.dbRun)(`INSERT INTO scans (url, status, violations_found, pages_scanned, scan_results, content_extracted) 
-       VALUES (?, ?, ?, ?, ?, ?)`, [url, 'pending', 0, 0, '[]', '[]']);
+        const result = await (0, init_1.dbRun)(`INSERT INTO scans (url, status, violations_found, pages_scanned, scan_results, content_extracted) VALUES ($1, $2, $3, $4, $5, $6)`, [url, 'pending', 0, 0, '[]', '[]']);
         const scanId = result.lastID;
         // Start background scan process
         processScan(scanId, url, config || {});
@@ -76,7 +76,7 @@ exports.scannerRouter.get('/:scanId', async (req, res) => {
                 message: 'Scan ID must be a number',
             });
         }
-        const scan = await (0, init_1.dbGet)('SELECT * FROM scans WHERE id = ?', [scanId]);
+        const scan = await (0, init_1.dbGet)('SELECT * FROM scans WHERE id = $1', [scanId]);
         if (!scan) {
             return res.status(404).json({
                 error: 'Scan Not Found',
@@ -129,7 +129,7 @@ exports.scannerRouter.get('/:scanId/progress', async (req, res) => {
                 message: 'Scan ID must be a number',
             });
         }
-        const scan = await (0, init_1.dbGet)('SELECT id, status, pages_scanned FROM scans WHERE id = ?', [scanId]);
+        const scan = await (0, init_1.dbGet)('SELECT id, status, pages_scanned FROM scans WHERE id = $1', [scanId]);
         if (!scan) {
             return res.status(404).json({
                 error: 'Scan Not Found',
@@ -177,6 +177,64 @@ exports.scannerRouter.get('/', async (req, res) => {
         });
     }
 });
+// Generate PDF report for scan results
+exports.scannerRouter.get('/:scanId/pdf', async (req, res) => {
+    try {
+        const scanId = parseInt(req.params.scanId);
+        if (isNaN(scanId)) {
+            return res.status(400).json({
+                error: 'Invalid Scan ID',
+                message: 'Scan ID must be a number',
+            });
+        }
+        // Get scan data
+        const scan = await (0, init_1.dbGet)('SELECT * FROM scans WHERE id = $1', [scanId]);
+        if (!scan) {
+            return res.status(404).json({
+                error: 'Scan Not Found',
+                message: 'No scan found with the provided ID',
+            });
+        }
+        if (scan.status !== 'completed') {
+            return res.status(400).json({
+                error: 'Scan Not Complete',
+                message: 'PDF can only be generated for completed scans',
+            });
+        }
+        // Parse scan results
+        const violations = JSON.parse(scan.scan_results || '[]');
+        // Calculate summary statistics
+        const summary = {
+            totalViolations: violations.length,
+            criticalViolations: violations.filter((v) => v.severity === 'critical').length,
+            highViolations: violations.filter((v) => v.severity === 'high').length,
+            mediumViolations: violations.filter((v) => v.severity === 'medium').length,
+            lowViolations: violations.filter((v) => v.severity === 'low').length,
+        };
+        // Generate PDF
+        const pdfBuffer = await pdfGenerator_1.pdfGenerator.generateComplianceReport({
+            url: scan.url,
+            scanDate: scan.created_at,
+            violations,
+            summary,
+        });
+        // Set response headers for PDF download
+        const filename = `compliance-report-${scanId}-${new Date().toISOString().split('T')[0]}.pdf`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+        // Send PDF
+        res.send(pdfBuffer);
+        console.log(`✅ PDF report generated for scan ${scanId}`);
+    }
+    catch (error) {
+        console.error('Error generating PDF:', error);
+        res.status(500).json({
+            error: 'PDF Generation Failed',
+            message: 'Failed to generate PDF report',
+        });
+    }
+});
 // Background scan processing function
 async function processScan(scanId, url, config) {
     const scraper = new webScraper_1.WebScraper(config);
@@ -184,14 +242,14 @@ async function processScan(scanId, url, config) {
     try {
         console.log(`🔄 Starting scan ${scanId} for ${url}`);
         // Update status to processing
-        await (0, init_1.dbRun)('UPDATE scans SET status = ? WHERE id = ?', ['processing', scanId]);
+        await (0, init_1.dbRun)('UPDATE scans SET status = $1 WHERE id = $2', ['processing', scanId]);
         activeScans.set(scanId, { scraper, status: 'processing' });
         console.log(`🤖 Checking robots.txt for ${url}`);
         // Check robots.txt
         const robotsAllowed = await scraper.checkRobotsTxt(url);
         if (!robotsAllowed) {
             console.log(`❌ Scan ${scanId} blocked by robots.txt`);
-            await (0, init_1.dbRun)('UPDATE scans SET status = ? WHERE id = ?', ['failed', scanId]);
+            await (0, init_1.dbRun)('UPDATE scans SET status = $1 WHERE id = $2', ['failed', scanId]);
             activeScans.delete(scanId);
             return;
         }
@@ -201,7 +259,7 @@ async function processScan(scanId, url, config) {
         const content = await scraper.scanWebsite(url, (progress) => {
             console.log(`📊 Scan ${scanId} progress: ${progress.completed}/${progress.total} pages`);
             // Update progress in database
-            (0, init_1.dbRun)('UPDATE scans SET pages_scanned = ? WHERE id = ?', [progress.completed, scanId]).catch(console.error);
+            (0, init_1.dbRun)('UPDATE scans SET pages_scanned = $1 WHERE id = $2', [progress.completed, scanId]).catch(console.error);
         });
         console.log(`📝 Scraped ${content.length} pages, analyzing for compliance...`);
         // Analyze content for compliance violations
@@ -209,12 +267,12 @@ async function processScan(scanId, url, config) {
         console.log(`📊 Analysis complete: ${violations.length} violations found`);
         // Update database with results
         await (0, init_1.dbRun)(`UPDATE scans SET
-        status = ?,
-        violations_found = ?,
-        pages_scanned = ?,
-        scan_results = ?,
-        content_extracted = ?
-       WHERE id = ?`, [
+        status = $1,
+        violations_found = $2,
+        pages_scanned = $3,
+        scan_results = $4,
+        content_extracted = $5
+       WHERE id = $6`, [
             'completed',
             violations.length,
             content.length,
@@ -231,7 +289,7 @@ async function processScan(scanId, url, config) {
             console.error(`❌ Stack trace:`, error.stack);
         }
         // Update status to failed
-        await (0, init_1.dbRun)('UPDATE scans SET status = ? WHERE id = ?', ['failed', scanId]);
+        await (0, init_1.dbRun)('UPDATE scans SET status = $1 WHERE id = $2', ['failed', scanId]);
     }
     finally {
         // Cleanup

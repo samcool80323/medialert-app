@@ -33,8 +33,7 @@ exports.adCreatorRouter.post('/check', async (req, res) => {
         // Generate compliant version
         const compliantContent = await analyzer.generateCompliantContent(content, violations);
         // Save draft to database
-        const result = await (0, init_1.dbRun)(`INSERT INTO ad_drafts (session_id, original_content, compliant_content, violations_detected, status) 
-       VALUES (?, ?, ?, ?, ?)`, [sessionId, content, compliantContent, JSON.stringify(violations), 'checked']);
+        const result = await (0, init_1.dbRun)(`INSERT INTO ad_drafts (session_id, original_content, compliant_content, violations_detected, status) VALUES ($1, $2, $3, $4, $5)`, [sessionId, content, compliantContent, JSON.stringify(violations), 'checked']);
         const draft = {
             id: result.lastID,
             sessionId,
@@ -62,9 +61,9 @@ exports.adCreatorRouter.post('/check', async (req, res) => {
 exports.adCreatorRouter.get('/session/:sessionId', async (req, res) => {
     try {
         const sessionId = req.params.sessionId;
-        const drafts = await (0, init_1.dbAll)(`SELECT * FROM ad_drafts 
-       WHERE session_id = ? 
-       ORDER BY created_at DESC 
+        const drafts = await (0, init_1.dbAll)(`SELECT * FROM ad_drafts
+       WHERE session_id = $1
+       ORDER BY created_at DESC
        LIMIT 10`, [sessionId]);
         const formattedDrafts = drafts.map(draft => ({
             id: draft.id,
@@ -96,7 +95,7 @@ exports.adCreatorRouter.get('/:draftId', async (req, res) => {
                 message: 'Draft ID must be a number',
             });
         }
-        const draft = await (0, init_1.dbGet)('SELECT * FROM ad_drafts WHERE id = ?', [draftId]);
+        const draft = await (0, init_1.dbGet)('SELECT * FROM ad_drafts WHERE id = $1', [draftId]);
         if (!draft) {
             return res.status(404).json({
                 error: 'Draft Not Found',

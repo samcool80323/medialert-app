@@ -18,9 +18,9 @@ async function performCleanup() {
     try {
         console.log('🧹 Starting database cleanup...');
         // Clean up expired scans
-        const scansResult = await (0, init_1.dbRun)('DELETE FROM scans WHERE expires_at < datetime("now")');
+        const scansResult = await (0, init_1.dbRun)('DELETE FROM scans WHERE expires_at < NOW()');
         // Clean up expired ad drafts
-        const draftsResult = await (0, init_1.dbRun)('DELETE FROM ad_drafts WHERE expires_at < datetime("now")');
+        const draftsResult = await (0, init_1.dbRun)('DELETE FROM ad_drafts WHERE expires_at < NOW()');
         console.log(`✅ Cleanup completed: ${scansResult.changes} scans, ${draftsResult.changes} drafts removed`);
     }
     catch (error) {
@@ -29,8 +29,8 @@ async function performCleanup() {
 }
 // Manual cleanup function for testing
 async function runCleanup() {
-    const scansResult = await (0, init_1.dbRun)('DELETE FROM scans WHERE expires_at < datetime("now")');
-    const draftsResult = await (0, init_1.dbRun)('DELETE FROM ad_drafts WHERE expires_at < datetime("now")');
+    const scansResult = await (0, init_1.dbRun)('DELETE FROM scans WHERE expires_at < NOW()');
+    const draftsResult = await (0, init_1.dbRun)('DELETE FROM ad_drafts WHERE expires_at < NOW()');
     return {
         scansRemoved: scansResult.changes,
         draftsRemoved: draftsResult.changes,
