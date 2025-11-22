@@ -9,28 +9,21 @@ console.log('🚀 Installing Chrome for Puppeteer...');
 try {
   // Check if we're in a production environment
   if (process.env.NODE_ENV === 'production') {
-    console.log('📦 Production environment detected, installing Chrome dependencies...');
+    console.log('📦 Production environment detected, optimizing Chrome installation...');
     
-    // Install Puppeteer with Chrome
-    try {
-      execSync('npx puppeteer browsers install chrome', { stdio: 'inherit' });
-      console.log('✅ Chrome installed successfully via Puppeteer');
-    } catch (error) {
-      console.log('⚠️ Puppeteer Chrome install failed, trying alternative method...');
-      
-      // Alternative: Try to install Chrome manually
-      try {
-        execSync('apt-get update && apt-get install -y google-chrome-stable', { stdio: 'inherit' });
-        console.log('✅ Chrome installed successfully via apt-get');
-      } catch (aptError) {
-        console.log('⚠️ apt-get install failed, Chrome may already be available in the system');
-      }
-    }
+    // Skip Chrome installation on Render - use system Chrome instead
+    console.log('🔧 Render environment detected, skipping Chrome download');
+    console.log('📋 Will use system Chrome at runtime');
+    
+    // Set environment variable to skip Puppeteer's Chrome download
+    process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'true';
+    
+    console.log('✅ Chrome installation optimized for Render');
   } else {
     console.log('🔧 Development environment, skipping Chrome installation');
   }
 } catch (error) {
-  console.error('❌ Chrome installation failed:', error.message);
+  console.error('❌ Chrome installation script error:', error.message);
   // Don't fail the build, just warn
   console.log('⚠️ Continuing without Chrome installation - Puppeteer will try to use system Chrome');
 }

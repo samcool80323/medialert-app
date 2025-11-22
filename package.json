@@ -7,7 +7,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run build:server && node dist/server/index.js",
     "dev:client": "vite",
-    "build": "npm run install-chrome && npm run build:server && npm run build:client",
+    "build": "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm run install-chrome && npm run build:server && npm run build:client",
     "build:server": "tsc -p tsconfig.server.json",
     "build:client": "vite build",
     "install-chrome": "node scripts/install-chrome.js",
