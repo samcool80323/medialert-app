@@ -133,11 +133,21 @@ export async function dbRun(sql: string, params: any[] = []): Promise<{ lastID: 
   }
   
   try {
-    const result = await pool.query(sql + ' RETURNING id', params);
-    return {
-      lastID: result.rows[0]?.id || 0,
-      changes: result.rowCount || 0
-    };
+    // Handle different SQL operations
+    if (sql.trim().toUpperCase().startsWith('INSERT')) {
+      const result = await pool.query(sql + ' RETURNING id', params);
+      return {
+        lastID: result.rows[0]?.id || 0,
+        changes: result.rowCount || 0
+      };
+    } else {
+      // For DELETE, UPDATE operations
+      const result = await pool.query(sql, params);
+      return {
+        lastID: 0,
+        changes: result.rowCount || 0
+      };
+    }
   } catch (error) {
     console.error('Database query error:', error);
     throw error;

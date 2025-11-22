@@ -21,12 +21,12 @@ async function performCleanup(): Promise<void> {
 
     // Clean up expired scans
     const scansResult = await dbRun(
-      'DELETE FROM scans WHERE expires_at < datetime("now")'
+      'DELETE FROM scans WHERE expires_at < NOW()'
     );
 
     // Clean up expired ad drafts
     const draftsResult = await dbRun(
-      'DELETE FROM ad_drafts WHERE expires_at < datetime("now")'
+      'DELETE FROM ad_drafts WHERE expires_at < NOW()'
     );
 
     console.log(`✅ Cleanup completed: ${scansResult.changes} scans, ${draftsResult.changes} drafts removed`);
@@ -38,11 +38,11 @@ async function performCleanup(): Promise<void> {
 // Manual cleanup function for testing
 export async function runCleanup(): Promise<{ scansRemoved: number; draftsRemoved: number }> {
   const scansResult = await dbRun(
-    'DELETE FROM scans WHERE expires_at < datetime("now")'
+    'DELETE FROM scans WHERE expires_at < NOW()'
   );
 
   const draftsResult = await dbRun(
-    'DELETE FROM ad_drafts WHERE expires_at < datetime("now")'
+    'DELETE FROM ad_drafts WHERE expires_at < NOW()'
   );
 
   return {
