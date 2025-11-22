@@ -1,34 +1,27 @@
-import sqlite3 from 'sqlite3';
-import { promisify } from 'util';
+import Database from 'better-sqlite3';
 import path from 'path';
 
-let db: sqlite3.Database;
+let db: Database.Database;
 
 export async function initializeDatabase(): Promise<void> {
   const dbPath = process.env.DATABASE_URL || './mediguard.db';
   
-  return new Promise((resolve, reject) => {
-    db = new sqlite3.Database(dbPath, (err) => {
-      if (err) {
-        console.error('Error opening database:', err);
-        reject(err);
-        return;
-      }
-      
-      console.log('Connected to SQLite database');
-      createTables()
-        .then(() => resolve())
-        .catch(reject);
-    });
-  });
+  try {
+    db = new Database(dbPath);
+    console.log('Connected to SQLite database');
+    
+    await createTables();
+    console.log('✅ Database initialized');
+  } catch (error) {
+    console.error('Error opening database:', error);
+    throw error;
+  }
 }
 
 async function createTables(): Promise<void> {
-  const run = promisify(db.run.bind(db));
-  
   try {
     // Create scans table
-    await run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS scans (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         url TEXT NOT NULL,
@@ -43,7 +36,7 @@ async function createTables(): Promise<void> {
     `);
 
     // Create ad_drafts table
-    await run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS ad_drafts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
@@ -57,10 +50,10 @@ async function createTables(): Promise<void> {
     `);
 
     // Create indexes for better performance
-    await run(`CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status)`);
-    await run(`CREATE INDEX IF NOT EXISTS idx_scans_expires_at ON scans(expires_at)`);
-    await run(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_session_id ON ad_drafts(session_id)`);
-    await run(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_expires_at ON ad_drafts(expires_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_scans_expires_at ON scans(expires_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_session_id ON ad_drafts(session_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_expires_at ON ad_drafts(expires_at)`);
 
     console.log('Database tables created successfully');
   } catch (error) {
@@ -69,7 +62,7 @@ async function createTables(): Promise<void> {
   }
 }
 
-export function getDatabase(): sqlite3.Database {
+export function getDatabase(): Database.Database {
   if (!db) {
     throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
@@ -78,41 +71,23 @@ export function getDatabase(): sqlite3.Database {
 
 // Helper functions for database operations
 export function dbGet(sql: string, params: any[] = []): Promise<any> {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+  return Promise.resolve(db.prepare(sql).get(params));
 }
 
 export function dbAll(sql: string, params: any[] = []): Promise<any[]> {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
+  return Promise.resolve(db.prepare(sql).all(params));
 }
 
 export function dbRun(sql: string, params: any[] = []): Promise<{ lastID: number; changes: number }> {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
+  const result = db.prepare(sql).run(params);
+  return Promise.resolve({
+    lastID: result.lastInsertRowid as number,
+    changes: result.changes
   });
 }
 
 export async function closeDatabase(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (db) {
-      db.close((err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    } else {
-      resolve();
-    }
-  });
+  if (db) {
+    db.close();
+  }
 }
