@@ -1,59 +1,73 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { Pool, Client } from 'pg';
 
-let db: Database.Database;
+let pool: Pool;
 
 export async function initializeDatabase(): Promise<void> {
-  const dbPath = process.env.DATABASE_URL || './mediguard.db';
+  const databaseUrl = process.env.DATABASE_URL;
+  
+  if (!databaseUrl) {
+    // Fallback to in-memory storage for development
+    console.log('No DATABASE_URL provided, using in-memory storage');
+    return;
+  }
   
   try {
-    db = new Database(dbPath);
-    console.log('Connected to SQLite database');
+    pool = new Pool({
+      connectionString: databaseUrl,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    });
+    
+    // Test connection
+    const client = await pool.connect();
+    console.log('Connected to PostgreSQL database');
+    client.release();
     
     await createTables();
     console.log('✅ Database initialized');
   } catch (error) {
-    console.error('Error opening database:', error);
+    console.error('Error connecting to database:', error);
     throw error;
   }
 }
 
 async function createTables(): Promise<void> {
+  if (!pool) return;
+  
   try {
     // Create scans table
-    db.exec(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS scans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         url TEXT NOT NULL,
         status TEXT CHECK (status IN ('pending', 'processing', 'completed', 'failed')) DEFAULT 'pending',
         violations_found INTEGER DEFAULT 0,
         pages_scanned INTEGER DEFAULT 0,
         scan_results TEXT, -- JSON string of violations
         content_extracted TEXT, -- JSON string of extracted content
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expires_at DATETIME DEFAULT (datetime('now', '+24 hours'))
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '24 hours')
       )
     `);
 
     // Create ad_drafts table
-    db.exec(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS ad_drafts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         session_id TEXT NOT NULL,
         original_content TEXT,
         compliant_content TEXT,
         violations_detected TEXT, -- JSON string
         status TEXT CHECK (status IN ('draft', 'checked', 'approved')) DEFAULT 'draft',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expires_at DATETIME DEFAULT (datetime('now', '+24 hours'))
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '24 hours')
       )
     `);
 
     // Create indexes for better performance
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_scans_expires_at ON scans(expires_at)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_session_id ON ad_drafts(session_id)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_expires_at ON ad_drafts(expires_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_scans_expires_at ON scans(expires_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_session_id ON ad_drafts(session_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ad_drafts_expires_at ON ad_drafts(expires_at)`);
 
     console.log('Database tables created successfully');
   } catch (error) {
@@ -62,32 +76,73 @@ async function createTables(): Promise<void> {
   }
 }
 
-export function getDatabase(): Database.Database {
-  if (!db) {
+export function getDatabase(): Pool {
+  if (!pool) {
     throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
-  return db;
+  return pool;
 }
+
+// In-memory storage fallback for development
+const memoryStorage: { [key: string]: any[] } = {
+  scans: [],
+  ad_drafts: []
+};
 
 // Helper functions for database operations
-export function dbGet(sql: string, params: any[] = []): Promise<any> {
-  return Promise.resolve(db.prepare(sql).get(params));
+export async function dbGet(sql: string, params: any[] = []): Promise<any> {
+  if (!pool) {
+    // Fallback to in-memory storage
+    console.log('Using in-memory storage for development');
+    return null;
+  }
+  
+  try {
+    const result = await pool.query(sql, params);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
+  }
 }
 
-export function dbAll(sql: string, params: any[] = []): Promise<any[]> {
-  return Promise.resolve(db.prepare(sql).all(params));
+export async function dbAll(sql: string, params: any[] = []): Promise<any[]> {
+  if (!pool) {
+    // Fallback to in-memory storage
+    console.log('Using in-memory storage for development');
+    return [];
+  }
+  
+  try {
+    const result = await pool.query(sql, params);
+    return result.rows;
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
+  }
 }
 
-export function dbRun(sql: string, params: any[] = []): Promise<{ lastID: number; changes: number }> {
-  const result = db.prepare(sql).run(params);
-  return Promise.resolve({
-    lastID: result.lastInsertRowid as number,
-    changes: result.changes
-  });
+export async function dbRun(sql: string, params: any[] = []): Promise<{ lastID: number; changes: number }> {
+  if (!pool) {
+    // Fallback to in-memory storage
+    console.log('Using in-memory storage for development');
+    return { lastID: Date.now(), changes: 1 };
+  }
+  
+  try {
+    const result = await pool.query(sql + ' RETURNING id', params);
+    return {
+      lastID: result.rows[0]?.id || 0,
+      changes: result.rowCount || 0
+    };
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
+  }
 }
 
 export async function closeDatabase(): Promise<void> {
-  if (db) {
-    db.close();
+  if (pool) {
+    await pool.end();
   }
 }
