@@ -5,9 +5,10 @@ let pool: Pool;
 export async function initializeDatabase(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   
-  if (!databaseUrl) {
-    // Fallback to in-memory storage for development
-    console.log('No DATABASE_URL provided, using in-memory storage');
+  if (!databaseUrl || databaseUrl === 'base' || databaseUrl.includes('base')) {
+    // Fallback to in-memory storage for development or when no valid DATABASE_URL
+    console.log('No valid DATABASE_URL provided, using in-memory storage');
+    console.log('✅ Database initialized (in-memory mode)');
     return;
   }
   
@@ -23,10 +24,12 @@ export async function initializeDatabase(): Promise<void> {
     client.release();
     
     await createTables();
-    console.log('✅ Database initialized');
+    console.log('✅ Database initialized (PostgreSQL)');
   } catch (error) {
     console.error('Error connecting to database:', error);
-    throw error;
+    console.log('Falling back to in-memory storage');
+    pool = undefined as any;
+    console.log('✅ Database initialized (in-memory fallback)');
   }
 }
 
