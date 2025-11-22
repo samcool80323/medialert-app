@@ -87,7 +87,7 @@ scannerRouter.get('/:scanId', async (req, res) => {
     }
 
     const scan = await dbGet(
-      'SELECT * FROM scans WHERE id = ?',
+      'SELECT * FROM scans WHERE id = $1',
       [scanId]
     );
 
@@ -149,7 +149,7 @@ scannerRouter.get('/:scanId/progress', async (req, res) => {
     }
 
     const scan = await dbGet(
-      'SELECT id, status, pages_scanned FROM scans WHERE id = ?',
+      'SELECT id, status, pages_scanned FROM scans WHERE id = $1',
       [scanId]
     );
 
@@ -215,7 +215,7 @@ async function processScan(scanId: number, url: string, config: any) {
     console.log(`🔄 Starting scan ${scanId} for ${url}`);
     
     // Update status to processing
-    await dbRun('UPDATE scans SET status = ? WHERE id = ?', ['processing', scanId]);
+    await dbRun('UPDATE scans SET status = $1 WHERE id = $2', ['processing', scanId]);
     activeScans.set(scanId, { scraper, status: 'processing' });
 
     console.log(`🤖 Checking robots.txt for ${url}`);
@@ -224,7 +224,7 @@ async function processScan(scanId: number, url: string, config: any) {
     if (!robotsAllowed) {
       console.log(`❌ Scan ${scanId} blocked by robots.txt`);
       await dbRun(
-        'UPDATE scans SET status = ? WHERE id = ?',
+        'UPDATE scans SET status = $1 WHERE id = $2',
         ['failed', scanId]
       );
       activeScans.delete(scanId);
@@ -238,7 +238,7 @@ async function processScan(scanId: number, url: string, config: any) {
       console.log(`📊 Scan ${scanId} progress: ${progress.completed}/${progress.total} pages`);
       // Update progress in database
       dbRun(
-        'UPDATE scans SET pages_scanned = ? WHERE id = ?',
+        'UPDATE scans SET pages_scanned = $1 WHERE id = $2',
         [progress.completed, scanId]
       ).catch(console.error);
     });
@@ -276,7 +276,7 @@ async function processScan(scanId: number, url: string, config: any) {
     }
     
     // Update status to failed
-    await dbRun('UPDATE scans SET status = ? WHERE id = ?', ['failed', scanId]);
+    await dbRun('UPDATE scans SET status = $1 WHERE id = $2', ['failed', scanId]);
   } finally {
     // Cleanup
     await scraper.close();

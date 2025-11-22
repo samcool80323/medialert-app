@@ -71,9 +71,9 @@ adCreatorRouter.get('/session/:sessionId', async (req, res) => {
     const sessionId = req.params.sessionId;
     
     const drafts = await dbAll(
-      `SELECT * FROM ad_drafts 
-       WHERE session_id = ? 
-       ORDER BY created_at DESC 
+      `SELECT * FROM ad_drafts
+       WHERE session_id = $1
+       ORDER BY created_at DESC
        LIMIT 10`,
       [sessionId]
     );
@@ -111,7 +111,7 @@ adCreatorRouter.get('/:draftId', async (req, res) => {
     }
 
     const draft = await dbGet(
-      'SELECT * FROM ad_drafts WHERE id = ?',
+      'SELECT * FROM ad_drafts WHERE id = $1',
       [draftId]
     );
 
