@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbGet, dbAll } from '../database/init';
 import { WebScraper } from '../services/webScraper';
 import { ComplianceAnalyzer } from '../services/complianceAnalyzer';
+import { pdfGenerator } from '../services/pdfGenerator';
 import { StartScanRequest, StartScanResponse, GetScanResponse, ScanRecord } from '../../shared/types';
 
 export const scannerRouter = express.Router();
@@ -202,6 +203,77 @@ scannerRouter.get('/', async (req, res) => {
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to retrieve scans',
+    });
+  }
+});
+
+// Generate PDF report for scan results
+scannerRouter.get('/:scanId/pdf', async (req, res) => {
+  try {
+    const scanId = parseInt(req.params.scanId);
+    if (isNaN(scanId)) {
+      return res.status(400).json({
+        error: 'Invalid Scan ID',
+        message: 'Scan ID must be a number',
+      });
+    }
+
+    // Get scan data
+    const scan = await dbGet(
+      'SELECT * FROM scans WHERE id = $1',
+      [scanId]
+    );
+
+    if (!scan) {
+      return res.status(404).json({
+        error: 'Scan Not Found',
+        message: 'No scan found with the provided ID',
+      });
+    }
+
+    if (scan.status !== 'completed') {
+      return res.status(400).json({
+        error: 'Scan Not Complete',
+        message: 'PDF can only be generated for completed scans',
+      });
+    }
+
+    // Parse scan results
+    const violations = JSON.parse(scan.scan_results || '[]');
+    
+    // Calculate summary statistics
+    const summary = {
+      totalViolations: violations.length,
+      criticalViolations: violations.filter((v: any) => v.severity === 'critical').length,
+      highViolations: violations.filter((v: any) => v.severity === 'high').length,
+      mediumViolations: violations.filter((v: any) => v.severity === 'medium').length,
+      lowViolations: violations.filter((v: any) => v.severity === 'low').length,
+    };
+
+    // Generate PDF
+    const pdfBuffer = await pdfGenerator.generateComplianceReport({
+      url: scan.url,
+      scanDate: scan.created_at,
+      violations,
+      summary,
+    });
+
+    // Set response headers for PDF download
+    const filename = `compliance-report-${scanId}-${new Date().toISOString().split('T')[0]}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    // Send PDF
+    res.send(pdfBuffer);
+
+    console.log(`✅ PDF report generated for scan ${scanId}`);
+
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    res.status(500).json({
+      error: 'PDF Generation Failed',
+      message: 'Failed to generate PDF report',
     });
   }
 });

@@ -21,8 +21,10 @@ export class WebScraper {
   async initialize(): Promise<void> {
     try {
       console.log('🚀 Initializing Puppeteer browser...');
-      this.browser = await puppeteer.launch({
-        headless: process.env.PUPPETEER_HEADLESS !== 'false',
+      
+      // Enhanced configuration for cloud deployment (Render)
+      const launchOptions: any = {
+        headless: 'new', // Use new headless mode
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -33,11 +35,63 @@ export class WebScraper {
           '--disable-gpu',
           '--disable-web-security',
           '--disable-features=VizDisplayCompositor',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-extensions',
+          '--disable-plugins',
+          '--disable-default-apps',
+          '--disable-hang-monitor',
+          '--disable-prompt-on-repost',
+          '--disable-sync',
+          '--disable-translate',
+          '--metrics-recording-only',
+          '--no-default-browser-check',
+          '--safebrowsing-disable-auto-update',
+          '--enable-automation',
+          '--password-store=basic',
+          '--use-mock-keychain',
+          '--single-process', // Important for containerized environments
+          '--memory-pressure-off',
+          '--max_old_space_size=4096',
         ],
-      });
+        timeout: 60000, // Increase timeout for cloud environments
+        protocolTimeout: 60000,
+      };
+
+      // Add executable path if in production (Render may need this)
+      if (process.env.NODE_ENV === 'production') {
+        console.log('🔧 Production environment detected, using additional configurations...');
+        // Render typically has Chrome installed at this path
+        const possiblePaths = [
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+        ];
+        
+        // Try to find Chrome executable
+        for (const path of possiblePaths) {
+          try {
+            const fs = await import('fs');
+            if (fs.existsSync(path)) {
+              launchOptions.executablePath = path;
+              console.log(`✅ Found Chrome executable at: ${path}`);
+              break;
+            }
+          } catch (e) {
+            // Continue to next path
+          }
+        }
+      }
+
+      this.browser = await puppeteer.launch(launchOptions);
       console.log('✅ Puppeteer browser initialized successfully');
     } catch (error) {
       console.error('❌ Failed to initialize Puppeteer browser:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+      }
       throw error;
     }
   }
@@ -50,8 +104,13 @@ export class WebScraper {
   }
 
   async scanWebsite(url: string, onProgress?: (progress: { currentPage: string; completed: number; total: number }) => void): Promise<WebsiteContent[]> {
-    if (!this.browser) {
-      await this.initialize();
+    try {
+      if (!this.browser) {
+        await this.initialize();
+      }
+    } catch (error) {
+      console.error('❌ Puppeteer initialization failed, falling back to HTTP scraping:', error);
+      return this.fallbackHttpScraping(url, onProgress);
     }
 
     const results: WebsiteContent[] = [];
@@ -273,6 +332,181 @@ export class WebScraper {
       return !disallowed;
     } catch {
       return true; // If we can't check robots.txt, allow crawling
+    }
+  }
+
+  // Fallback HTTP scraping method when Puppeteer fails
+  private async fallbackHttpScraping(url: string, onProgress?: (progress: { currentPage: string; completed: number; total: number }) => void): Promise<WebsiteContent[]> {
+    console.log('🔄 Using fallback HTTP scraping method...');
+    
+    try {
+      if (onProgress) {
+        onProgress({
+          currentPage: url,
+          completed: 0,
+          total: 1,
+        });
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'MediGuard-AI-Scanner/1.0 (Compliance Scanner)',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate',
+          'Connection': 'keep-alive',
+        },
+        // Remove timeout as it's not supported in standard fetch
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const html = await response.text();
+      const $ = cheerio.load(html);
+
+      // Extract basic content using Cheerio
+      const content: WebsiteContent = {
+        url,
+        title: $('title').text().trim() || 'Untitled Page',
+        metaDescription: $('meta[name="description"]').attr('content') || '',
+        headings: {
+          h1: [],
+          h2: [],
+          h3: [],
+        },
+        paragraphs: [],
+        links: [],
+        images: [],
+        forms: [],
+        scripts: [],
+      };
+
+      // Extract headings
+      $('h1').each((_, element) => {
+        const text = $(element).text().trim();
+        if (text) content.headings.h1.push(text);
+      });
+      
+      $('h2').each((_, element) => {
+        const text = $(element).text().trim();
+        if (text) content.headings.h2.push(text);
+      });
+      
+      $('h3').each((_, element) => {
+        const text = $(element).text().trim();
+        if (text) content.headings.h3.push(text);
+      });
+
+      // Extract paragraphs
+      $('p').each((_, element) => {
+        const text = $(element).text().trim();
+        if (text && text.length > 10) { // Filter out very short paragraphs
+          content.paragraphs.push(text);
+        }
+      });
+
+      // Extract links
+      $('a[href]').each((_, element) => {
+        const href = $(element).attr('href');
+        const text = $(element).text().trim();
+        if (href && text) {
+          try {
+            const absoluteUrl = new URL(href, url).href;
+            const isInternal = new URL(absoluteUrl).hostname === new URL(url).hostname;
+            content.links.push({
+              text,
+              href: absoluteUrl,
+              isInternal,
+            });
+          } catch {
+            // Skip invalid URLs
+          }
+        }
+      });
+
+      // Extract images
+      $('img[src]').each((_, element) => {
+        const src = $(element).attr('src');
+        const alt = $(element).attr('alt') || '';
+        const title = $(element).attr('title');
+        if (src) {
+          try {
+            const absoluteUrl = new URL(src, url).href;
+            content.images.push({
+              src: absoluteUrl,
+              alt,
+              title,
+            });
+          } catch {
+            // Skip invalid URLs
+          }
+        }
+      });
+
+      // Extract forms (basic detection)
+      $('form').each((_, element) => {
+        const action = $(element).attr('action') || '';
+        const method = $(element).attr('method') || 'GET';
+        const inputs: string[] = [];
+        
+        $(element).find('input, textarea, select').each((_, input) => {
+          const type = $(input).attr('type') || $(input).prop('tagName')?.toLowerCase() || 'input';
+          const name = $(input).attr('name') || '';
+          inputs.push(`${type}${name ? `:${name}` : ''}`);
+        });
+        
+        content.forms.push({
+          action,
+          method: method.toUpperCase(),
+          inputs,
+        });
+      });
+
+      // Extract scripts
+      $('script[src]').each((_, element) => {
+        const src = $(element).attr('src');
+        if (src) {
+          try {
+            const absoluteUrl = new URL(src, url).href;
+            content.scripts.push(absoluteUrl);
+          } catch {
+            // Skip invalid URLs
+          }
+        }
+      });
+
+      if (onProgress) {
+        onProgress({
+          currentPage: url,
+          completed: 1,
+          total: 1,
+        });
+      }
+
+      console.log('✅ Fallback HTTP scraping completed successfully');
+      return [content];
+
+    } catch (error) {
+      console.error('❌ Fallback HTTP scraping failed:', error);
+      
+      // Return minimal content to prevent complete failure
+      return [{
+        url,
+        title: 'Scan Failed',
+        metaDescription: 'Scan failed due to technical issues',
+        headings: {
+          h1: ['Website scan could not be completed'],
+          h2: [],
+          h3: [],
+        },
+        paragraphs: ['The website could not be accessed due to technical restrictions or connectivity issues.'],
+        links: [],
+        images: [],
+        forms: [],
+        scripts: [],
+      }];
     }
   }
 }
