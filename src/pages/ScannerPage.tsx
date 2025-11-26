@@ -28,7 +28,7 @@ export function ScannerPage() {
     setIsScanning(true);
 
     try {
-      const response = await fetch('/api/scanner/simple', {
+      const response = await fetch('/api/scanner/minimal', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
