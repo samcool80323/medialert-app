@@ -28,18 +28,13 @@ export function ScannerPage() {
     setIsScanning(true);
 
     try {
-      const response = await fetch('/api/scanner/start', {
+      const response = await fetch('/api/scanner/simple', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           url: url.trim(),
-          config: {
-            maxPages: 10,
-            maxDepth: 2,
-            respectRobotsTxt: true,
-          },
         }),
       });
 
