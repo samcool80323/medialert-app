@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { ComplianceAnalyzer } from '../../src/server/services/complianceAnalyzer';
+import { ComplianceAnalyzer } from '../lib/complianceAnalyzer';
 
 const checkAdSchema = z.object({
   content: z.string().min(1, 'Content is required'),

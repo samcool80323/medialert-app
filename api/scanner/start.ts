@@ -1,9 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import { serverlessWebScraper } from '../../src/server/services/webScraperServerless';
-import { ComplianceAnalyzer } from '../../src/server/services/complianceAnalyzer';
-import { ComplianceViolation } from '../../src/shared/types';
+import { serverlessWebScraper } from '../lib/webScraper';
+import { ComplianceAnalyzer } from '../lib/complianceAnalyzer';
+import { ComplianceViolation } from '../lib/types';
 
 let complianceAnalyzer: ComplianceAnalyzer | null = null;
 
