@@ -5,7 +5,19 @@ import { serverlessWebScraper } from '../../src/server/services/webScraperServer
 import { ComplianceAnalyzer } from '../../src/server/services/complianceAnalyzer';
 import { ComplianceViolation } from '../../src/shared/types';
 
-const complianceAnalyzer = new ComplianceAnalyzer();
+let complianceAnalyzer: ComplianceAnalyzer | null = null;
+
+// Initialize ComplianceAnalyzer with error handling
+try {
+  if (process.env.OPENAI_API_KEY) {
+    complianceAnalyzer = new ComplianceAnalyzer();
+    console.log('✅ ComplianceAnalyzer initialized successfully');
+  } else {
+    console.warn('⚠️ OPENAI_API_KEY not found, compliance analysis will be limited');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize ComplianceAnalyzer:', error);
+}
 
 const startScanSchema = z.object({
   url: z.string().url(),
@@ -19,6 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -29,6 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    console.log('📥 Received scan request:', req.body);
     const { url } = startScanSchema.parse(req.body);
     const scanId = uuidv4();
     
@@ -69,7 +83,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }));
 
       // Analyze compliance for all pages
-      const allViolations = await complianceAnalyzer.analyzeContent(websiteContent);
+      let allViolations: ComplianceViolation[] = [];
+      if (complianceAnalyzer) {
+        try {
+          allViolations = await complianceAnalyzer.analyzeContent(websiteContent);
+        } catch (error) {
+          console.error('Compliance analysis failed:', error);
+          // Continue without compliance analysis
+        }
+      } else {
+        console.warn('Compliance analysis skipped - analyzer not available');
+      }
       const totalPagesScanned = websiteContent.length;
 
       // Update scan with results
@@ -124,6 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error) {
     console.error('Request processing error:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     
     if (error instanceof z.ZodError) {
       return res.status(400).json({
@@ -132,9 +157,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // Ensure we always return JSON
     return res.status(500).json({
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
     });
   }
 }
